@@ -7,6 +7,7 @@
 # 3. provide a way for user to input data and run predictive model to return results.
 # 4. extra -> allow download of a PDF report on EDA.
 ##
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,7 +18,18 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFECV
 from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import SVR
+from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score, roc_curve, precision_recall_curve
+import pickle
 from geopy.geocoders import Nominatim
+from sklearn.ensemble import RandomForestClassifier
+from boruta import BorutaPy
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
 from apyori import apriori
 
 
@@ -71,11 +83,20 @@ df['buyDrinks'] = df['buyDrinks'].fillna(0)
 # drop all NA for the TotalSpent_RM column
 df.dropna(subset=['TotalSpent_RM'], inplace=True)
 df.sort_values(by=['Date', 'Time'], ignore_index=True, inplace=True)
+# create a function to perform this data transformation
+def addDrinks (row):
+    if row['buyDrinks'] > 0:
+        return 1
+    else:
+        return 0
+
+# apply the function to create new column
+df['Drinks'] = df.apply(lambda row: addDrinks(row), axis=1)
 rows, columns = df.shape
 st.write(df.head())
 st.write(f"Final dataset consists of **{rows}** rows and **{columns}** columns")
 
-st.write("**External Data - Weather**")
+st.write("**Final Dataset with External Data (Weather)**")
 # weather dataset
 weather_df = pd.read_csv('cyberjaya 2015-10-01 to 2016-03-31.csv')
 # dataset cleaning process
@@ -94,10 +115,13 @@ st.write(f"After the pre-processing steps done, the final dataset consists of **
 
 st.markdown("---")
 st.subheader("Exploratory Data Analysis")
+st.write("**Insight 1: The majority of customers are Malay, with a significant number of Indian and Chinese customers as well.**")
 st.bar_chart(merged_df["Race"].value_counts())
-
+st.write("**Insight 2: The number of female customers are slighly more than the number of male customers.**")
 st.bar_chart(merged_df["Gender"].value_counts())
 
+
+st.write("**Insight 3: The majority of customers are between 30-40 years old.**")
 bins = [10,20,30,40,50,60]
 
 df['Age_Bin'] = pd.cut(df['Age_Range'], bins=bins)
@@ -112,8 +136,9 @@ plt.ylabel('Count')
 st.pyplot()
 
 st.markdown("---")
-st.subheader("Clustering Analysis")
-st.write("Question 1: Where are the customers located?")
+st.subheader("Question : Where are the customers located?")
+st.subheader("Technique: k-Means Clustering")
+st.write("We will perform k-means clustering to group the customers based on their geographic locations (latitude & longitude).")
 
 km_df = merged_df[['latitude', 'longitude']]
 
@@ -132,64 +157,42 @@ plt.ylabel('Longitude')
 plt.title('Clusters of Customers\' Locations')
 st.pyplot()
 
+st.write("Majority center point detection for exact locations")
+
 geolocator = Nominatim(user_agent="geoapiExercises")
 
 for i in range(len(cluster_centers)):
     cluster_center = [cluster_centers[i][0], cluster_centers[i][1]]
     location = geolocator.reverse(cluster_center, exactly_one=True)
-    st.write(str(cluster_centers[i][0]) + ', ' + str(cluster_centers[i][1]) + ': ' +location.raw['address']['city'])
-
-
+    st.write(location.raw['address']['city'] + ' :  ' +str(cluster_centers[i][0]) + ', ' + str(cluster_centers[i][1]))
+    
 st.markdown("---")
 
+st.subheader("Question: Will a customer purchase drinks in the laundry shop?")
 
-st.title('Weather vs Customer Count')
+clf_df = merged_df.copy()
+st.dataframe(clf_df.head())
 
-# Create a function to drop unnecessary columns
-def drop_cols(df):
-    return df.drop(['Time', 'Race', 'Gender', 'Body_Size', 'Age_Range', 'With_Kids',
-                   'Kids_Category', 'Basket_Size', 'Basket_colour', 'Attire',
-                   'Shirt_Colour', 'shirt_type', 'Pants_Colour', 'pants_type', 'Wash_Item',
-                   'Washer_No', 'Dryer_No', 'Spectacles', 'TimeSpent_minutes', 'buyDrinks',
-                   'latitude', 'longitude', 'Num_of_Baskets', 
-                   'Drinks'], axis=1)
+# drop unnecessary columns
+clf_df.drop(['Date', 'Time', 'latitude', 'longitude'], axis=1, inplace=True)
 
-# Create a function to group and count customers by weather
-def group_weather(df):
-    weather_cus = df.groupby(['Date', 'tempmax', 'tempmin', 'temp', 'feelslikemax', 'feelslikemin',
-                              'feelslike', 'humidity', 'precip', 'precipprob', 'precipcover',
-                              'preciptype', 'windgust', 'windspeed', 'winddir', 'cloudcover',
-                              'visibility', 'conditions']).size().reset_index(name='count')
-    weather_cus.drop(['Date'], axis=1, inplace=True)
-    return weather_cus
+# one-hot encoding
+col_list = [col for col in clf_df.columns.tolist() if clf_df[col].dtype.name == 'object']
+df_ob = clf_df[col_list]
+clf_df = clf_df.drop(col_list, 1)
+df_ob = pd.get_dummies(df_ob)
+clf_df = pd.concat([clf_df, df_ob], axis=1)
 
-# Use Streamlit to create a user interface to upload the data
-# st.set_page_config(page_title="Weather Customer", page_icon=":guardsman:", layout="wide")
+st.dataframe(clf_df.head())
 
-# Create a function to select object columns
-def select_obj_cols(df):
-    col_list = [col for col in df.columns.tolist() if df[col].dtype.name == 'object']
-    df_ob = df[col_list]
-    df = df.drop(col_list, 1)
-    df_ob = pd.get_dummies(df_ob)
-    df = pd.concat([df, df_ob], axis=1)
-    return df
+clf_X = clf_df.drop(['Drinks', 'buyDrinks'], axis=1)
+clf_y = clf_df['Drinks']
+clf_colnames = clf_X.columns
 
-# Create a function to perform random forest classification
-def random_forest_classification(X, y):
-    rf = RandomForestClassifier()
-    rfe = RFECV(rf, cv=5)
-    param_grid = {"estimator__n_estimators": [10, 50, 100],
-                  "estimator__max_depth": [1, 5, 10],
-                  "estimator__min_samples_leaf": [1, 2, 4]}
-    grid_search = GridSearchCV(rfe, param_grid, cv=5)
-    grid_search.fit(X, y)
-    st.write("Best parameters: {}".format(grid_search.best_params_))
-    st.write("Best score: {:.2f}".format(grid_search.best_score_))
-    ht_rf = RandomForestClassifier(n_estimators=10, max_depth=1, min_samples_leaf=1)
-    rf.fit(X, y)
-    rfe = RFECV(ht_rf, min_features_to_select=1, cv=2)
-    rfe.fit(X, y)
+rf = RandomForestClassifier(n_jobs=-1, class_weight='balanced_subsample', max_depth=5)
+feat_selector = BorutaPy(rf, n_estimators='auto', random_state=1)
+
+feat_selector.fit(clf_X.values, clf_y.values)
 
 def ranking(ranks, names, order=1):
     minmax = MinMaxScaler()
@@ -197,85 +200,180 @@ def ranking(ranks, names, order=1):
     ranks = map(lambda x: round(x,2), ranks)
     return dict(zip(names, ranks))
 
-group_weather = select_obj_cols(group_weather)
-X = group_weather.drop(['count'], axis=1)
-y = group_weather['count']
+boruta_score = ranking(list(map(float, feat_selector.ranking_)), clf_colnames, order=-1)
+boruta_score = pd.DataFrame(list(boruta_score.items()), columns=['Features', 'Score'])
+boruta_score = boruta_score.sort_values("Score", ascending = False)
+
+boruta_top_10 = boruta_score.Features[:10]
+
+clf_X = clf_df[boruta_top_10]
+clf_y = clf_df['Drinks']
+
+clf_X_train, clf_X_test, clf_y_train, clf_y_test = train_test_split(clf_X, clf_y, test_size=0.2, random_state=42)
+
+sm = SMOTE()
+X_train_smote, y_train_smote = sm.fit_resample(clf_X_train, clf_y_train)
+
+st.write("Original training set shape: ", clf_X_train.shape)
+st.write("Resampled training set shape: ", X_train_smote.shape)
+st.write("Original test set shape: ", clf_X_test.shape)
+st.write("Original target variable shape: ", clf_y_train.shape)
+st.write("Resampled target variable shape: ", y_train_smote.shape)
+
+logreg_clf = LogisticRegression(C=c)
+logreg_clf.fit(clf_X_train, clf_y_train)
+clf_y_pred = logreg_clf.predict(clf_X_test)
+
+def evaluate_model(clf, X_train, y_train, colour, label):
+    st.write("Accuracy: {:.3f}".format(accuracy_score(clf_y_test, clf_y_pred)))
+    st.write("Accuracy on training set: {:.3f}".format(logreg_clf.score(X_train, y_train)))
+    st.write("Accuracy on test set: {:.3f}".format(logreg_clf.score(clf_X_test, clf_y_test)))
+
+    # confusion matrix
+    cm = confusion_matrix(clf_y_test, clf_y_pred)
+    st.write('**********************')
+    st.write('Majority TN =', cm[0][0])
+    st.write('Majority FP =', cm[0][1])
+    st.write('Majority FN =', cm[1][0])
+    st.write('Majority TP =', cm[1][1])
+    st.write('**********************')
+
+    # calculate AUC
+    prob = clf.predict_proba(clf_X_test)
+    prob = prob[:, 1]
+    auc = roc_auc_score(clf_y_test, prob)
+    st.write('AUC: %.2f' % auc)
+
+    fpr, tpr, thresholds = roc_curve(clf_y_test, prob) # roc curve
+    prec, rec, threshold = precision_recall_curve(clf_y_test, prob) # precision-recall curve
+
+    st.write("Precision-Recall: {:.2f}".format(metrics.auc(rec, prec)))
+
+    class_names = ['0', '1']
+    disp = plot_confusion_matrix(clf, clf_X_test, clf_y_test, display_labels=class_names, cmap=plt.cm.Blues)
+    disp.ax_.set_title("Confusion Matrix")
+    st.pyplot()
+
+    # plot ROC Curve 
+    plt.plot(fpr, tpr, color=colour, label=label) 
+    plt.plot([0, 1], [0, 1], color='green', linestyle='--')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('Receiver Operating Characteristic (ROC) Curve')
+    plt.legend()
+    st.pyplot()
+
+    # plot Precision-Recall Curve
+    plt.plot(prec, rec, color=colour, label=label) 
+    plt.plot([1, 0], [0.1, 0.1], color='green', linestyle='--')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend()
+    st.pyplot()
+
+    return fpr, tpr, prec, rec
+
+
+def logreg_model():
+    # Create a slider for the regularization parameter C
+    c = st.slider('Regularization parameter C', 0.01, 10.0)
+
+    # train the model
+    logreg_clf = LogisticRegression(C=c)
+    logreg_clf.fit(clf_X_train, clf_y_train)
+
+    clf_y_pred = logreg_clf.predict(clf_X_test)
+
+    # model accuracy
+    st.write('--------------WITHOUT SMOTE--------------')
+    logreg_fpr, logreg_tpr, logreg_prec, logreg_rec = evaluate_model(logreg_clf, clf_X_train, clf_y_train, 'orange', 'LogReg')
+
+    # Save the model
+    if st.button('Save Model'):
+        pickle.dump(logreg_clf, open('logreg_clf.sav', 'wb'))
+        st.success('Model saved!')
+
+    # Display coefficients
+    coefficients = logreg_clf.coef_
+    st.write("Coefficients: ", coefficients)
+
+    # train the model using SMOTE
+    logreg_clf = LogisticRegression(C=c)
+    logreg_clf.fit(X_train_smote, y_train_smote)
+    clf_y_pred = logreg_clf.predict(clf_X_test)
+
+    # model accuracy
+    st.write('--------------WITH SMOTE--------------')
+    logreg_sm_fpr, logreg_sm_tpr, logreg_sm_prec, logreg_sm_rec = evaluate_model(logreg_clf, X_train_smote, y_train_smote, 'blue', 'LogReg with SMOTE')
+
+
+if __name__ == '__main__':
+    logreg_model()
+
+st.markdown("---")
+
+st.subheader("Question: What is the relationship between the weather conditions and the number of customers at the laundry shop?")
+
+weather_cus = merged_df.drop(['Time', 'Race', 'Gender', 'Body_Size', 'Age_Range', 'With_Kids',
+       'Kids_Category', 'Basket_Size', 'Basket_colour', 'Attire',
+       'Shirt_Colour', 'shirt_type', 'Pants_Colour', 'pants_type', 'Wash_Item',
+       'Washer_No', 'Dryer_No', 'Spectacles', 'TimeSpent_minutes', 'buyDrinks',
+       'latitude', 'longitude', 'Num_of_Baskets'], axis=1)
+
+# group by the weather and calcute count of customer on each day
+weather_cus = weather_cus.groupby(['Date', 'tempmax', 'tempmin', 'temp', 'feelslikemax', 'feelslikemin',
+       'feelslike', 'humidity', 'precip', 'precipprob', 'precipcover',
+       'preciptype', 'windgust', 'windspeed', 'winddir', 'cloudcover',
+       'visibility', 'conditions']).size().reset_index(name='count')
+
+weather_cus.drop(['Date'], axis=1, inplace=True)
+
+# one-hot encoding
+col_list = [col for col in weather_cus.columns.tolist() if weather_cus[col].dtype.name == 'object']
+df_ob = weather_cus[col_list]
+weather_cus = weather_cus.drop(col_list, 1)
+df_ob = pd.get_dummies(df_ob)
+weather_cus = pd.concat([weather_cus, df_ob], axis=1)
+
+X = weather_cus.drop(['count'], axis=1)
+y = weather_cus['count']
 colnames = X.columns
-rfe_score = ranking(list(map(float, rfe.ranking_)), colnames, order=-1)
-rfe_score = pd.DataFrame(list(rfe_score.items()), columns=['Features', 'Score'])
-rfe_score = rfe_score.sort_values("Score", ascending = False)
-rfe_top_5 = rfe_score.Features[:5]
-st.subheader("RFE Top 5 Features:")
-st.dataframe(rfe_top_5)
-reg_X = group_weather[rfe_top_5]
-reg_y = group_weather['count']
-# split the data into training and test sets
-reg_X_train, reg_X_test, reg_y_train, reg_y_test = train_test_split(reg_X, reg_y, test_size=0.3, random_state=50)
-st.subheader("Linear Regression Model:")
-linreg = LinearRegression()
-parameters = {'fit_intercept':[True,False], 'normalize':[True,False]}
-grid_search = GridSearchCV(linreg, parameters, cv=5)
-grid_search.fit(reg_X_train, reg_y_train)
-st.write("Best parameters: ", grid_search.best_params_)
-st.write("Best score: ", grid_search.best_score_)
-st.subheader("SVR Model:")
-svr = SVR()
-param_grid = {"C": [0.1, 1, 10], 
-                "kernel": ["linear", "poly", "rbf"],
-                "degree":[1, 2, 3],
-                "epsilon": [0.01, 0.1, 1]}
-svr_grid_search = GridSearchCV(svr, param_grid, cv=5)
-svr_grid_search.fit(reg_X_train, reg_y_train)
-st.write("Best parameters: {}".format(svr_grid_search.best_params_))
 
-# Make predictions on the test data
-reg_y_pred = grid_search.predict(reg_X_test)
-svr_y_pred = svr_grid_search.predict(reg_X_test)
+# select the parameters for the grid search
+n_estimators = st.slider("Number of trees in the forest", 10, 100, 50)
+max_depth = st.slider("The maximum depth of the tree", 1, 10, 5)
+min_samples_leaf = st.slider("The minimum number of samples required to be at a leaf node", 1, 4, 2)
 
-# Calculate the evaluation metrics for linear regression
-linreg_mae = mean_absolute_error(reg_y_test, reg_y_pred)
-linreg_mse = mean_squared_error(reg_y_test, reg_y_pred)
-linreg_r2 = r2_score(reg_y_test, reg_y_pred)
+param_grid = {"estimator__n_estimators": [n_estimators],
+              "estimator__max_depth": [max_depth],
+              "estimator__min_samples_leaf": [min_samples_leaf]}
 
-# Calculate the evaluation metrics for SVR
-svr_mae = mean_absolute_error(reg_y_test, svr_y_pred)
-svr_mse = mean_squared_error(reg_y_test, svr_y_pred)
-svr_r2 = r2_score(reg_y_test, svr_y_pred)
+rf = RandomForestClassifier()
+rfe = RFECV(rf, cv=5)
+grid_search = GridSearchCV(rfe, param_grid, cv=5)
+grid_search.fit(X, y)
 
-# Display the evaluation metrics
-st.write("Linear Regression Evaluation Metrics:")
-st.write("Mean Absolute Error: ", linreg_mae)
-st.write("Mean Squared Error: ", linreg_mse)
-st.write("R-Squared: ", linreg_r2)
-st.write("SVR Evaluation Metrics:")
-st.write("Mean Absolute Error: ", svr_mae)
-st.write("Mean Squared Error: ", svr_mse)
-st.write("R-Squared: ", svr_r2)
+# display the results
+st.write("Best parameters: {}".format(grid_search.best_params_))
+st.write("Best score: {:.2f}".format(grid_search.best_score_))
 
-# st.set_page_config(page_title="Weather Customer", page_icon=":guardsman:", layout="wide")
-# st.subheader("Upload your data")
+# # Function to rank the feature importances
+# def ranking(ranks, names, order=1):
+#     minmax = MinMaxScaler()
+#     ranks = minmax.fit_transform(order*np.array([ranks]).T).T[0]
+#     ranks = map(lambda x: round(x,2), ranks)
+#     return dict(zip(names, ranks))
 
-# file_upload = st.file_uploader("Upload a CSV file", type=["csv"])
-# if file_upload is not None:
-#     weather_cus = pd.read_csv(file_upload)
-#     weather_cus = select_obj_cols(weather_cus)
-#     X = weather_cus.drop(['count'], axis=1)
-#     y = weather_cus['count']
-#     st.subheader("Random Forest Classification:")
-#     random_forest_classification(X, y)
+# rfe_score = ranking(list(map(float, rfe.support_)), colnames, order=-1)
 
-# need configure API
-# st.subheader("Upload your data")
+# rfe_score = pd.DataFrame(list(rfe_score.items()), columns=['Features', 'Score'])
+# rfe_score = rfe_score.sort_values("Score", ascending = False)
 
-# file_upload = st.file_uploader("Upload a CSV file", type=["csv"])
-# if file_upload is not None:
-#     merged_df = pd.read_csv(file_upload)
-#     weather_cus = drop_cols(merged_df)
-#     weather_cus = group_weather(weather_cus)
+# # Display top 10 features
+# st.write('---------Top 10 Features----------')
+# st.dataframe(ranking.head(10))
 
-#     # Show the result
-#     st.subheader("Results:")
-#     st.dataframe(weather_cus.head(5))
 
 
 # def generate_report():
