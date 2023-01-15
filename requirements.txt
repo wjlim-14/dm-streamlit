@@ -1,13 +1,12 @@
 apyori==1.1.2
 boruta==0.3
 imblearn==0.0
-pyfpgrowth
 geopy==2.3.0
-pandas=1.5.2
-numpy= 1.23.5
-matplotlib=3.6.3
-seaborn=0.12.1
-apyori=1.0.0
-imblearn=0.0
-geopy=2.3.0
-scikit-learn=1.2.0
+pandas==1.5.2
+numpy==1.23.5
+matplotlib==3.6.3
+seaborn==0.12.1
+apyori==1.0.0
+imblearn==0.0
+geopy==2.3.0
+scikit-learn==1.2.0
