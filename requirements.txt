@@ -1,3 +1,4 @@
+streamlib
 apyori==1.1.2
 boruta==0.3
 imblearn==0.0
