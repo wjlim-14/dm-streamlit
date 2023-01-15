@@ -22,6 +22,8 @@ from sklearn.svm import SVR
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
 from sklearn.linear_model import LogisticRegression
+import sklearn.metrics as metrics
+
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score, roc_curve, precision_recall_curve
 import pickle
 from geopy.geocoders import Nominatim
@@ -171,7 +173,7 @@ st.markdown("---")
 st.subheader("Question: Will a customer purchase drinks in the laundry shop?")
 
 clf_df = merged_df.copy()
-st.dataframe(clf_df.head())
+# st.dataframe(clf_df.head())
 
 # drop unnecessary columns
 clf_df.drop(['Date', 'Time', 'latitude', 'longitude'], axis=1, inplace=True)
@@ -183,7 +185,7 @@ clf_df = clf_df.drop(col_list, 1)
 df_ob = pd.get_dummies(df_ob)
 clf_df = pd.concat([clf_df, df_ob], axis=1)
 
-st.dataframe(clf_df.head())
+# st.dataframe(clf_df.head())
 
 clf_X = clf_df.drop(['Drinks', 'buyDrinks'], axis=1)
 clf_y = clf_df['Drinks']
@@ -220,6 +222,8 @@ st.write("Original test set shape: ", clf_X_test.shape)
 st.write("Original target variable shape: ", clf_y_train.shape)
 st.write("Resampled target variable shape: ", y_train_smote.shape)
 
+c = st.slider('Regularization parameter C', 0.01, 10.0)
+
 logreg_clf = LogisticRegression(C=c)
 logreg_clf.fit(clf_X_train, clf_y_train)
 clf_y_pred = logreg_clf.predict(clf_X_test)
@@ -249,10 +253,10 @@ def evaluate_model(clf, X_train, y_train, colour, label):
 
     st.write("Precision-Recall: {:.2f}".format(metrics.auc(rec, prec)))
 
-    class_names = ['0', '1']
-    disp = plot_confusion_matrix(clf, clf_X_test, clf_y_test, display_labels=class_names, cmap=plt.cm.Blues)
-    disp.ax_.set_title("Confusion Matrix")
-    st.pyplot()
+    # class_names = ['0', '1']
+    # disp = plot_confusion_matrix(clf, clf_X_test, clf_y_test, display_labels=class_names, cmap=plt.cm.Blues)
+    # disp.ax_.set_title("Confusion Matrix")
+    # st.pyplot()
 
     # plot ROC Curve 
     plt.plot(fpr, tpr, color=colour, label=label) 
@@ -277,7 +281,6 @@ def evaluate_model(clf, X_train, y_train, colour, label):
 
 def logreg_model():
     # Create a slider for the regularization parameter C
-    c = st.slider('Regularization parameter C', 0.01, 10.0)
 
     # train the model
     logreg_clf = LogisticRegression(C=c)
@@ -335,45 +338,80 @@ df_ob = weather_cus[col_list]
 weather_cus = weather_cus.drop(col_list, 1)
 df_ob = pd.get_dummies(df_ob)
 weather_cus = pd.concat([weather_cus, df_ob], axis=1)
+# st.dataframe(weather_cus.head())
+# st.write("Data after one-hot encoding")
 
 X = weather_cus.drop(['count'], axis=1)
 y = weather_cus['count']
 colnames = X.columns
 
-# select the parameters for the grid search
-n_estimators = st.slider("Number of trees in the forest", 10, 100, 50)
-max_depth = st.slider("The maximum depth of the tree", 1, 10, 5)
-min_samples_leaf = st.slider("The minimum number of samples required to be at a leaf node", 1, 4, 2)
-
-param_grid = {"estimator__n_estimators": [n_estimators],
-              "estimator__max_depth": [max_depth],
-              "estimator__min_samples_leaf": [min_samples_leaf]}
-
 rf = RandomForestClassifier()
 rfe = RFECV(rf, cv=5)
+
+param_grid = {"estimator__n_estimators": [10, 50, 100],
+                "estimator__max_depth": [1, 5, 10],
+                "estimator__min_samples_leaf": [1, 2, 4]}
+
 grid_search = GridSearchCV(rfe, param_grid, cv=5)
 grid_search.fit(X, y)
 
-# display the results
 st.write("Best parameters: {}".format(grid_search.best_params_))
 st.write("Best score: {:.2f}".format(grid_search.best_score_))
 
-# # Function to rank the feature importances
-# def ranking(ranks, names, order=1):
-#     minmax = MinMaxScaler()
-#     ranks = minmax.fit_transform(order*np.array([ranks]).T).T[0]
-#     ranks = map(lambda x: round(x,2), ranks)
-#     return dict(zip(names, ranks))
+ht_rf = RandomForestClassifier(n_estimators=10, max_depth=1, min_samples_leaf=1)
+rf.fit(X, y)
+rfe = RFECV(ht_rf, min_features_to_select=1, cv=2)
 
-# rfe_score = ranking(list(map(float, rfe.support_)), colnames, order=-1)
+rfe.fit(X, y)
 
-# rfe_score = pd.DataFrame(list(rfe_score.items()), columns=['Features', 'Score'])
-# rfe_score = rfe_score.sort_values("Score", ascending = False)
+def ranking(ranks, names, order=1):
+    minmax = MinMaxScaler()
+    ranks = minmax.fit_transform(order*np.array([ranks]).T).T[0]
+    ranks = map(lambda x: round(x,2), ranks)
+    return dict(zip(names, ranks))
 
-# # Display top 10 features
-# st.write('---------Top 10 Features----------')
-# st.dataframe(ranking.head(10))
+rfe_score = ranking(list(map(float, rfe.ranking_)), colnames, order=-1)
+rfe_score = pd.DataFrame(list(rfe_score.items()), columns=['Features', 'Score'])
+rfe_score = rfe_score.sort_values("Score", ascending = False)
 
+rfe_top_5 = rfe_score.Features[:5]
+
+# st.write('---------Top 10----------')
+# st.dataframe(rfe_score.head(10))
+
+# st.write('---------Bottom 10----------')
+# st.dataframe(rfe_score.tail(10))
+
+reg_X = weather_cus[rfe_top_5]
+reg_y = weather_cus['count']
+
+# split the data into training and test sets
+reg_X_train, reg_X_test, reg_y_train, reg_y_test = train_test_split(reg_X, reg_y, test_size=0.3, random_state=50)
+
+# Create the linear regression model
+linreg = LinearRegression()
+
+# Define the hyperparameters and their possible values
+parameters = {'fit_intercept':[True,False]}
+
+# Perform grid search with cross-validation
+grid_search = GridSearchCV(linreg, parameters, cv=5)
+grid_search.fit(reg_X_train, reg_y_train)
+
+# Print the best parameters and score
+st.write("Best parameters: ", grid_search.best_params_)
+st.write("Best score: ", grid_search.best_score_)
+
+svr = SVR()
+
+param_grid = {"C": [0.1, 1, 10], 
+              "kernel": ["linear", "poly", "rbf"],
+              "degree":[1, 2, 3],
+              "epsilon": [0.01, 0.1, 1]}
+    
+svr_grid_search = GridSearchCV(svr, param_grid, cv=5)
+svr_grid_search.fit(reg_X_train, reg_y_train)
+st.write("Best parameters: {}".format(svr_grid_search.best_params_))
 
 
 # def generate_report():
