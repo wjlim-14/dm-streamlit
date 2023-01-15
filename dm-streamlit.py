@@ -7,6 +7,7 @@
 # 3. provide a way for user to input data and run predictive model to return results.
 # 4. extra -> allow download of a PDF report on EDA.
 ##
+!pip install seaborn
 
 import streamlit as st
 import pandas as pd
